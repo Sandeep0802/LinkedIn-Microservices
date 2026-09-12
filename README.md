@@ -1,760 +1,387 @@
-💼 LinkedIn Microservices — Spring Boot + React
-
-A full-stack LinkedIn-style social networking application built from scratch with Spring Boot Microservices, React, Apache Kafka, Redis, Elasticsearch, MySQL, and AWS S3.
-
-The project demonstrates a practical event-driven microservices architecture for authentication, professional profiles, connections, posts, personalized feeds, search, media storage, and persistent notifications.
-
-Goal: build a realistic social networking platform where each major responsibility is isolated into its own service and services communicate through REST and Kafka events.
-
-🏗️ Architecture
-
-
-
-High-level request flow
-
-React Frontend
-      │
-      │ HTTP / REST
-      ▼
-API Gateway :8080
-      │
-      ├──────────────► User Service :8081 ─────► MySQL
-      │
-      ├──────────────► Post Service :8082 ─────► MySQL
-      │                                  └─────► AWS S3
-      │
-      ├──────────────► Feed Service :8083 ─────► Redis
-      │
-      ├──────────────► Search Service :8084 ──► Elasticsearch
-      │
-      └──────────────► Notification Service :8085 ─► MySQL
-
-                 Apache Kafka
-        ┌────────────┼─────────────┐
-        ▼            ▼             ▼
-   Feed updates   Search      Notifications
-
-The API Gateway is the only backend entry point used by the frontend. It handles routing and JWT validation for protected routes.
-
-There is no separate authentication microservice; authentication and JWT creation are handled by the User Service.
-
-✨ Features
-
-🔐 Authentication & Security
-
-User registration and login
-
-JWT access and refresh tokens
-
-BCrypt password hashing
-
-JWT validation at the API Gateway
-
-Protected user, post, feed, search, and notification routes
-
-Request user identity propagated through X-User-Id
-
-👤 Profiles & Connections
-
-View user profiles
-
-Edit professional profile information
-
-Add/update headline, about, location, and skills
-
-Upload profile and cover images to AWS S3
-
-Send connection requests
-
-Accept connection requests
-
-View pending requests
-
-View connections from either side of a relationship
-
-📝 Posts
-
-Create text posts
-
-Create posts with images
-
-View individual posts
-
-View posts created by a user
-
-Like / unlike posts
-
-Comment on posts
-
-View comments
-
-Delete posts
-
-Publish post lifecycle events through Kafka
-
-📰 Personalized Feed
-
-Personalized feed for each user
-
-Fan-out-on-write architecture
-
-Feed entries stored as post IDs in Redis
-
-New posts pushed to the author's connections
-
-Author also receives the post in their own feed
-
-Feed size capped using Redis trim
-
-Deleted posts removed from Redis feeds through post.deleted
-
-Paginated feed retrieval
-
-🔎 Global Search
-
-Search people
-
-Browse all indexed users
-
-Search users by skill
-
-Search posts
-
-Fuzzy matching for post content
-
-Elasticsearch used as a dedicated search index
-
-User and post documents kept synchronized through Kafka events
-
-Deleted posts removed from Elasticsearch through post.deleted
-
-🔔 Notifications
-
-Persistent notifications are generated from Kafka events and stored in MySQL.
-
-Welcome notifications
-
-Connection request notifications
-
-Connection acceptance notifications
-
-Post like notifications
-
-Post comment notifications
-
-Unread notification count
-
-Mark individual notification as read
-
-Mark all notifications as read
-
-The current implementation uses REST polling on the frontend for notification refresh; WebSockets are intentionally not used.
-
-🖼️ Media Storage
-
-Profile photo uploads
-
-Cover photo uploads
-
-Post image uploads
-
-AWS S3 used for object storage
-
-Public image URLs returned to the frontend
-
-🛠️ Tech Stack
-
-Technology
-
-Purpose
-
-Java 21
-
-Backend programming language
-
-Spring Boot 4.1.1
-
-Microservices framework
-
-Spring Cloud Gateway
-
-API gateway, routing, JWT protection
-
-Spring Security / JWT
-
-Authentication and authorization
-
-Spring Data JPA
-
-MySQL persistence
-
-Spring Data Redis
-
-Feed storage/caching
-
-Apache Kafka
-
-Asynchronous event-driven communication
-
-Spring Kafka
-
-Kafka producers and consumers
-
-OpenFeign
-
-Feed Service → User Service communication
-
-Elasticsearch 9.4.5
-
-Search index and full-text search
-
-MySQL 8
-
-Relational persistence
-
-Redis
-
-Personalized feed storage
-
-AWS S3
-
-Profile, cover, and post image storage
-
-React
-
-Frontend application
-
-Axios
-
-Frontend HTTP client
-
-React Router
-
-Frontend routing
-
-Docker Compose
-
-Local infrastructure
-
-📦 Microservices
-
-Service
-
-Port
-
-Main Responsibility
-
-Storage / Integration
-
-API Gateway
-
-8080
-
-Routing + JWT validation
-
-Spring Cloud Gateway + Redis rate-limit support
-
-User Service
-
-8081
-
-Authentication, users, profiles, connections
-
-MySQL + Kafka + S3
-
-Post Service
-
-8082
-
-Posts, likes, comments, post images
-
-MySQL + Kafka + S3
-
-Feed Service
-
-8083
-
-Personalized feed generation and retrieval
-
-Redis + Kafka + OpenFeign
-
-Search Service
-
-8084
-
-People, skills, and post search
-
-Elasticsearch + Kafka
-
-Notification Service
-
-8085
-
-Persistent event-based notifications
-
-MySQL + Kafka
-
-🔄 Kafka Event-Driven Architecture
-
-Kafka connects services asynchronously so that write operations do not require every downstream action to happen synchronously.
-
-Events produced by User Service
-
-user.created
-user.updated
-connection.requested
-connection.accepted
-
-Events produced by Post Service
-
-post.created
-post.liked
-post.commented
-post.deleted
-
-Consumers
-
-User Service
-   │
-   ├── user.created ──────────► Search Service
-   │                         └► Notification Service
-   │
-   ├── user.updated ──────────► Search Service
-   │
-   ├── connection.requested ──► Notification Service
-   │
-   └── connection.accepted ───► Notification Service
-
-Post Service
-   │
-   ├── post.created ──────────► Feed Service
-   │                         └► Search Service
-   │
-   ├── post.liked ────────────► Notification Service
-   │
-   ├── post.commented ────────► Notification Service
-   │
-   └── post.deleted ──────────► Feed Service
-                               Search Service
-
-📰 Feed Generation — Fan-Out on Write
-
-The Feed Service stores post IDs, not complete post objects.
-
-When a user creates a post:
-
-User
- │
- ▼
-API Gateway :8080
- │
- ▼
-Post Service :8082
- │
- ├── Save post ───────────────► MySQL
- │
- └── Publish post.created
-             │
-             ▼
-           Kafka
-             │
-             ▼
-        Feed Service :8083
-             │
-             ├── Ask User Service for connections
-             │
-             ├── Push post ID to each connection feed
-             │
-             └── Push post ID to author's own feed
-                         │
-                         ▼
-                       Redis
-
-When the frontend requests a feed:
-
-GET /api/v1/feed/{userId}
-        │
-        ▼
-Feed Service
-        │
-        ▼
-Redis → [postId1, postId2, postId3, ...]
-        │
-        ▼
-Frontend fetches full posts from Post Service
-
-Redis lists are capped using feed.max-size so feeds do not grow indefinitely.
-
-Post deletion cleanup
-
-Post Service
-    │
-    ├── Delete from MySQL
-    │
-    └── publish post.deleted
-             │
-             ▼
-           Kafka
-          ┌────┴────┐
-          ▼         ▼
-    Feed Service  Search Service
-          │         │
-          ▼         ▼
-       Redis      Elasticsearch
-   remove postId   remove document
-
-This keeps the feed cache and search index synchronized with the transactional post database.
-
-🔎 Search Architecture
-
-Search is separated from transactional MySQL storage.
-
-User / Post changes
-       │
-       ▼
-     Kafka
-       │
-       ▼
- Search Service :8084
-       │
-       ├── Users index ──────► Elasticsearch
-       │
-       └── Posts index ──────► Elasticsearch
-
-Search APIs
-
-GET /api/v1/search/people?q={query}
-GET /api/v1/search/people/all
-GET /api/v1/search/skills?skill={skill}
-GET /api/v1/search/posts?q={query}
-
-User search covers fields such as name, headline, and location. Skill search uses the indexed skills field, while post search uses Elasticsearch text matching with automatic fuzziness.
-
-🔔 Notification Architecture
-
-Notifications are persisted rather than only being logged.
-
-User / Post Service
-        │
-        ▼
-      Kafka
-        │
-        ▼
-Notification Service :8085
-        │
-        ▼
-      MySQL
-        │
-        ▼
-Notification REST API
-        │
-        ▼
-React Frontend
-
-The notification record keeps IDs such as userId and actorId. The frontend resolves the actor through the User Service so users see names and profile images instead of raw IDs.
-
-Notification APIs
-
-GET /api/v1/notifications/{userId}
-GET /api/v1/notifications/{userId}/unread
-GET /api/v1/notifications/{userId}/unread/count
-PUT /api/v1/notifications/{notificationId}/read
-PUT /api/v1/notifications/{userId}/read-all
-
-🌐 API Gateway Routes
-
-All frontend requests go through http://localhost:8080.
-
-Route
-
-Service
-
-JWT
-
-/api/v1/auth/**
-
-User Service
-
-No
-
-/api/v1/users/**
-
-User Service
-
-Yes
-
-/api/v1/posts/**
-
-Post Service
-
-Yes
-
-/api/v1/feed/**
-
-Feed Service
-
-Yes
-
-/api/v1/search/**
-
-Search Service
-
-Yes
-
-/api/v1/notifications/**
-
-Notification Service
-
-Yes
-
-🔌 Main REST APIs
-
-Authentication
-
-POST /api/v1/auth/register
-POST /api/v1/auth/login
-
-Users
-
-GET  /api/v1/users/{userId}
-PUT  /api/v1/users/{userId}/profile
-POST /api/v1/users/{targetUserId}/connect
-PUT  /api/v1/users/connection/{connectionId}/accept
-GET  /api/v1/users/{userId}/connections
-GET  /api/v1/users/{userId}/connections/pending
-POST /api/v1/users/{userId}/profile-photo
-POST /api/v1/users/{userId}/cover-photo
-
-Posts
-
-POST   /api/v1/posts
-GET    /api/v1/posts/{postId}
-GET    /api/v1/posts/user/{userId}
-POST   /api/v1/posts/{postId}/like
-POST   /api/v1/posts/{postId}/comment
-GET    /api/v1/posts/{postId}/comments
-DELETE /api/v1/posts/{postId}
-
-Feed
-
-GET    /api/v1/feed/{userId}?page=0&size=10
-DELETE /api/v1/feed/{userId}/cache
-
-Search
-
-GET /api/v1/search/people?q={query}
-GET /api/v1/search/people/all
-GET /api/v1/search/skills?skill={skill}
-GET /api/v1/search/posts?q={query}
-
-Notifications
-
-GET /api/v1/notifications/{userId}
-GET /api/v1/notifications/{userId}/unread
-GET /api/v1/notifications/{userId}/unread/count
-PUT /api/v1/notifications/{notificationId}/read
-PUT /api/v1/notifications/{userId}/read-all
-
-🐳 Infrastructure with Docker Compose
-
-The included docker-compose.yml provides the shared infrastructure:
-
-MySQL 8.0 — 3306
-
-Redis — 6379
-
-Kafka (KRaft) — 9092
-
-Elasticsearch 9.4.5 — 9200
-
-Start infrastructure:
-
+# 💼 LinkedIn System — Spring Boot Microservices
+
+A LinkedIn-like social networking platform built from scratch using **Spring Boot Microservices**, with event-driven communication, distributed feed generation, full-text search, authentication, and media storage.
+
+The project demonstrates how independent microservices collaborate — through an API Gateway and Kafka — to handle users, connections, posts, feeds, search, and notifications.
+
+> 📌 This repository contains the **backend only** (6 Spring Boot services). Any client — Postman, curl, a mobile app, or a web frontend — can consume it through the API Gateway.
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart TD
+    Client([Client<br/>Web / Mobile / Postman]) --> GW["API Gateway : 8080<br/>JWT Validation"]
+
+    GW --> US["User Service : 8081<br/>MySQL + S3"]
+    GW --> PS["Post Service : 8082<br/>MySQL + S3"]
+    GW --> FS["Feed Service : 8083<br/>Redis"]
+    GW --> SS["Search Service : 8084<br/>Elasticsearch"]
+    GW --> NS["Notification Service : 8085<br/>MySQL"]
+
+    US -- publishes --> K{{Kafka}}
+    PS -- publishes --> K
+    K -- consumes --> FS
+    K -- consumes --> SS
+    K -- consumes --> NS
+    FS -. Feign call .-> US
+
+    style GW fill:#4f46e5,color:#fff
+    style K fill:#111827,color:#fff
+```
+
+---
+
+## ✨ Features
+
+### 🔐 Authentication
+* User registration and login
+* JWT-based authentication (access + refresh tokens)
+* Gateway-level JWT validation before requests reach a service
+* Secure password handling with BCrypt
+
+### 👤 User Management
+* User profiles with headline, location, and skills
+* Profile photo and cover photo uploads (S3)
+* Connection requests, acceptance, and pending-request lookup
+* View a user's connections
+
+### 📝 Posts
+* Create posts (with optional image upload)
+* Like a post
+* Comment on a post / list comments
+* View a user's posts
+* Delete a post — cascades a `post.deleted` event so it's cleaned up from feeds **and** the search index
+
+### 📰 Feed
+* Personalized, paginated user feed
+* Kafka-driven fan-out-on-write feed generation
+* Redis-backed feed storage for fast reads
+* Manual feed-cache invalidation endpoint
+
+### 🔎 Search
+* Search people by name/keyword
+* Search by skill
+* Full-text, fuzzy post search
+* Elasticsearch index kept in sync via Kafka (create/update/delete)
+
+### 🔔 Notifications
+* Welcome notification on signup
+* Connection request / acceptance notifications
+* Post like / comment notifications
+* Unread count and mark-as-read endpoints
+
+---
+
+## 🛠️ Tech Stack
+
+| Technology                             | Purpose                           |
+| --------------------------------------- | ---------------------------------- |
+| **Java 25**                             | Programming language               |
+| **Spring Boot 4.1.1**                   | Microservices framework            |
+| **Spring Cloud Gateway (WebFlux)**      | API Gateway + routing              |
+| **Apache Kafka (KRaft mode)**           | Event-driven communication         |
+| **Redis**                               | Feed storage and caching           |
+| **Elasticsearch 9.4.5**                 | Full-text search                   |
+| **MySQL 8**                             | Persistent data storage            |
+| **AWS S3**                              | Profile/cover photo & post image storage |
+| **JWT**                                 | Authentication                     |
+| **OpenFeign**                           | Service-to-service communication   |
+| **Docker Compose**                      | Local infrastructure setup         |
+
+---
+
+## 📦 Microservices
+
+| Service                  |   Port | Data Store           | Responsibility                          |
+| ------------------------ | -----: | --------------------- | ---------------------------------------- |
+| **API Gateway**          | `8080` | —                      | Routing + JWT validation                 |
+| **User Service**         | `8081` | MySQL + S3             | Auth, profiles, connections              |
+| **Post Service**         | `8082` | MySQL + S3             | Posts, likes, comments                   |
+| **Feed Service**         | `8083` | Redis                  | Personalized, paginated feeds            |
+| **Search Service**       | `8084` | Elasticsearch          | People, skill, and post search           |
+| **Notification Service** | `8085` | MySQL                  | Event-driven notifications               |
+
+---
+
+## 📡 API Reference
+
+All routes below are exposed through the **API Gateway (`http://localhost:8080`)**. Routes other than `/api/v1/auth/**` require a valid `Authorization: Bearer <token>` header.
+
+### Auth & Users — `user-service`
+| Method | Endpoint                                              | Description                     |
+| ------ | ------------------------------------------------------ | -------------------------------- |
+| POST   | `/api/v1/auth/register`                                | Register a new user              |
+| POST   | `/api/v1/auth/login`                                   | Log in and receive JWT tokens    |
+| GET    | `/api/v1/users/{userId}`                               | Get a user's profile             |
+| PUT    | `/api/v1/users/{userId}/profile`                       | Update profile details           |
+| POST   | `/api/v1/users/{userId}/profile-photo`                 | Upload profile photo             |
+| POST   | `/api/v1/users/{userId}/cover-photo`                   | Upload cover photo               |
+| POST   | `/api/v1/users/{targetUserId}/connect`                 | Send a connection request        |
+| PUT    | `/api/v1/users/connection/{connectionId}/accept`       | Accept a connection request      |
+| GET    | `/api/v1/users/{userId}/connections`                   | List a user's connections        |
+| GET    | `/api/v1/users/{userId}/connections/pending`           | List pending connection requests |
+
+### Posts — `post-service`
+| Method | Endpoint                              | Description               |
+| ------ | -------------------------------------- | --------------------------- |
+| POST   | `/api/v1/posts`                        | Create a post                |
+| GET    | `/api/v1/posts/{postId}`               | Get a single post            |
+| GET    | `/api/v1/posts/user/{userId}`          | Get all posts by a user      |
+| POST   | `/api/v1/posts/{postId}/like`          | Like a post                  |
+| POST   | `/api/v1/posts/{postId}/comment`       | Comment on a post            |
+| GET    | `/api/v1/posts/{postId}/comments`      | List comments on a post      |
+| DELETE | `/api/v1/posts/{postId}`               | Delete a post                |
+
+### Feed — `feed-service`
+| Method | Endpoint                          | Description                              |
+| ------ | ----------------------------------- | ------------------------------------------ |
+| GET    | `/api/v1/feed/{userId}?page=&size=` | Get a user's paginated feed (post IDs)     |
+| DELETE | `/api/v1/feed/{userId}/cache`       | Clear a user's cached feed                 |
+
+### Search — `search-service`
+| Method | Endpoint                          | Description               |
+| ------ | ----------------------------------- | --------------------------- |
+| GET    | `/api/v1/search/people?q=`          | Search people by keyword    |
+| GET    | `/api/v1/search/people/all`         | List all indexed people     |
+| GET    | `/api/v1/search/skills?skill=`      | Search people by skill      |
+| GET    | `/api/v1/search/posts?q=`           | Fuzzy full-text post search |
+
+### Notifications — `notification-service`
+| Method | Endpoint                                    | Description                    |
+| ------ | --------------------------------------------- | -------------------------------- |
+| GET    | `/api/v1/notifications/{userId}`              | List all notifications           |
+| GET    | `/api/v1/notifications/{userId}/unread`       | List unread notifications        |
+| GET    | `/api/v1/notifications/{userId}/unread/count` | Get unread notification count    |
+| PUT    | `/api/v1/notifications/{notificationId}/read` | Mark a single notification read  |
+| PUT    | `/api/v1/notifications/{userId}/read-all`     | Mark all notifications read      |
+
+---
+
+## 🔄 Event-Driven Architecture
+
+Kafka decouples the services. Below is every event currently published and who consumes it.
+
+```mermaid
+flowchart LR
+    subgraph US["User Service"]
+        UC[user.created]
+        UU[user.updated]
+        CR[connection.requested]
+        CA[connection.accepted]
+    end
+
+    subgraph PS["Post Service"]
+        PC[post.created]
+        PD[post.deleted]
+        PL[post.liked]
+        PM[post.commented]
+    end
+
+    SearchSvc["Search Service"]
+    FeedSvc["Feed Service"]
+    NotifSvc["Notification Service"]
+
+    UC --> SearchSvc
+    UC --> NotifSvc
+    UU --> SearchSvc
+
+    PC --> FeedSvc
+    PC --> SearchSvc
+    PD --> FeedSvc
+    PD --> SearchSvc
+    PL --> NotifSvc
+    PM --> NotifSvc
+
+    CR --> NotifSvc
+    CA --> NotifSvc
+```
+
+> 🆕 `post.deleted` is a newer addition: deleting a post now fans out to **both** the Feed Service (removes the post ID from every affected Redis feed) and the Search Service (removes the document from the Elasticsearch index), so deleted posts don't linger anywhere.
+
+---
+
+## 📰 Feed Generation
+
+The feed uses a **fan-out-on-write** approach: work happens once at post-creation time so reads stay O(1) from Redis.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant P as Post Service
+    participant K as Kafka
+    participant F as Feed Service
+    participant US as User Service
+    participant R as Redis
+
+    U->>P: Create post
+    P->>P: Save to MySQL
+    P->>K: publish post.created
+    K->>F: consume post.created
+    F->>US: getConnections(authorId)  [Feign]
+    US-->>F: [connectionIds]
+    F->>R: LPUSH feed:{connectionId} → postId (for each connection + author)
+    F->>R: TRIM to feed.max-size
+```
+
+Deleting a post reverses the process, removing the post ID from every feed it was pushed into:
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant P as Post Service
+    participant K as Kafka
+    participant F as Feed Service
+
+    U->>P: Delete post
+    P->>P: Remove from MySQL
+    P->>K: publish post.deleted
+    K->>F: consume post.deleted
+    F->>F: Remove postId from author's + connections' feeds in Redis
+```
+
+Reads are simple and fast — `GET /api/v1/feed/{userId}` just paginates the pre-built Redis list; the client then fetches full post details from the Post Service.
+
+---
+
+## 🔎 Search Architecture
+
+Search runs independently of the transactional MySQL databases, staying in sync purely through Kafka.
+
+```mermaid
+flowchart LR
+    US[User Service] -- user.created / user.updated --> K{{Kafka}}
+    PS[Post Service] -- post.created / post.deleted --> K
+    K --> SS[Search Service]
+    SS -- index / update / delete --> ES[(Elasticsearch)]
+    Client([Client]) -- GET /api/v1/search/** --> SS
+```
+
+---
+
+## 🐳 Infrastructure
+
+Docker Compose spins up all required infrastructure for local development:
+
+* **MySQL 8** — `localhost:3306`
+* **Redis** — `localhost:6379`
+* **Kafka (KRaft, single broker)** — `localhost:9092`
+* **Elasticsearch 9.4.5** — `localhost:9200`
+
+Start it with:
+
+```bash
 docker compose up -d
+```
 
-Check containers:
+---
 
-docker ps
+## 🚀 Running the Project
 
-Stop infrastructure:
-
-docker compose down
-
-Persistent Docker volumes are used for MySQL and Elasticsearch data.
-
-🚀 Running the Project
-
-1. Clone the repository
-
-git clone https://github.com/Sandeep0802/LinkedIn-Microservices.git
-cd LinkedIn-Microservices
-
-2. Start infrastructure
-
+### 1. Start Infrastructure
+```bash
 docker compose up -d
+```
 
-3. Configure environment variables
+### 2. Set Environment Variables
+Export the variables listed below (or use a `.env` / IDE run configuration) for each service before starting it.
 
-Each service uses environment variables for database, Kafka, JWT, Elasticsearch, User Service, and AWS configuration.
+### 3. Start Each Service
+```text
+API Gateway            → 8080
+User Service           → 8081
+Post Service           → 8082
+Feed Service           → 8083
+Search Service         → 8084
+Notification Service   → 8085
+```
+Each service is a standalone Spring Boot app — run it via `./mvnw spring-boot:run` from its own folder, or run the generated jar.
+
+### 4. Call the API
+Point any client (Postman, curl, or your own frontend) at:
+```text
+http://localhost:8080
+```
+The API Gateway is the single entry point; it validates JWTs and routes to the right service.
+
+---
+
+## 🔑 Environment Variables
+
+Sensitive configuration is injected via environment variables — **never commit real secrets to GitHub.**
+
+| Service                  | Variables |
+| ------------------------- | ---------- |
+| **API Gateway**           | `JWT_SECRET` |
+| **User Service**          | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `KAFKA_BOOTSTRAP_SERVERS`, `JWT_SECRET`, `JWT_EXPIRE`, `JWT_REFRESH`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY`, `AWS_REGION`, `AWS_BUCKET_NAME` |
+| **Post Service**          | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `KAFKA_BOOTSTRAP_SERVERS`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY`, `AWS_REGION`, `AWS_BUCKET_NAME` |
+| **Feed Service**          | `KAFKA_BOOTSTRAP_SERVERS`, `USER_SERVICE_URL`, `FEED_SIZE` |
+| **Search Service**        | `ELASTIC_URI`, `KAFKA_BOOTSTRAP_SERVERS` |
+| **Notification Service**  | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `KAFKA_BOOTSTRAP_SERVERS` |
 
 Example values:
+```text
+JWT_SECRET=your-secret-key
+JWT_EXPIRE=3600000
+JWT_REFRESH=604800000
 
-DB_URL=jdbc:mysql://localhost:3306/your_database
+DB_URL=jdbc:mysql://localhost:3306/your_db
 DB_USERNAME=root
-DB_PASSWORD=your_password
+DB_PASSWORD=root
 
 KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-
-JWT_SECRET=your-secret
-JWT_EXPIRE=...
-JWT_REFRESH=...
+ELASTIC_URI=http://localhost:9200
 
 AWS_ACCESS_KEY=your-access-key
 AWS_SECRET_KEY=your-secret-key
-AWS_REGION=your-region
-AWS_BUCKET_NAME=your-bucket
+AWS_REGION=ap-south-1
+AWS_BUCKET_NAME=your-bucket-name
 
-ELASTIC_URI=http://localhost:9200
 USER_SERVICE_URL=http://localhost:8081
 FEED_SIZE=100
+```
 
-Never commit real credentials, JWT secrets, or AWS keys to GitHub.
+---
 
-4. Start the Spring Boot services
+## 📂 Project Structure
 
-Run these applications from the IDE or Maven:
-
-API Gateway          → 8080
-User Service         → 8081
-Post Service         → 8082
-Feed Service         → 8083
-Search Service       → 8084
-Notification Service → 8085
-
-5. Start the React frontend
-
-cd frontend
-npm install
-npm run dev
-
-The frontend communicates with the backend through:
-
-http://localhost:8080
-
-📂 Project Structure
-
+```text
 LinkedIn-Microservices/
 │
-├── api-gateway/
-│   └── src/
+├── api-gateway/            # Routing + JWT validation (:8080)
+├── user-service/           # Auth, profiles, connections (:8081)
+├── post-service/           # Posts, likes, comments (:8082)
+├── feed-service/           # Redis-backed personalized feed (:8083)
+├── search-service/         # Elasticsearch-backed search (:8084)
+├── notification-service/   # Kafka-driven notifications (:8085)
 │
-├── user-service/
-│   └── src/
-│
-├── post-service/
-│   └── src/
-│
-├── feed-service/
-│   └── src/
-│
-├── search-service/
-│   └── src/
-│
-├── notification-service/
-│   └── src/
-│
-├── frontend/
-│   ├── src/
-│   ├── public/
-│   ├── package.json
-│   └── vite.config.js
-│
-├── docs/
-│   └── architecture.png
-│
-├── docker-compose.yml
-└── README.md
+└── docker-compose.yml      # MySQL, Redis, Kafka, Elasticsearch
+```
 
-🎯 Project Highlights
+---
 
-This project focuses on demonstrating practical microservices patterns rather than building a single monolithic application.
+## 🎯 What I Learned
 
-1. Database-per-service approach
+Through this project, I gained practical experience with:
 
-Transactional data is separated by responsibility, for example:
+* Designing a microservices architecture from scratch
+* Event-driven communication using Kafka, including keeping downstream state (feeds, search index) consistent on both create **and** delete
+* JWT authentication enforced at an API Gateway
+* Fan-out-on-write feed generation with Redis
+* Elasticsearch full-text and fuzzy search
+* Service-to-service communication with OpenFeign
+* AWS S3 for media storage
+* Dockerized local infrastructure
 
-User Service       → User DB
-Post Service       → Post DB
-Notification       → Notification DB
+---
 
-2. Event-driven communication
+## 📌 Project Status
 
-Kafka is used for operations that should be asynchronous, such as:
+**Backend completed and tested.** ✅
 
-post.created
-post.deleted
-post.liked
-post.commented
-user.created
-user.updated
-connection.requested
-connection.accepted
+Authentication, user/connection management, posts, Kafka-driven feed generation and invalidation, Elasticsearch search with delete propagation, media storage, and notifications are all implemented and working end-to-end.
 
-3. Specialized data stores
+---
 
-Each technology is used where it provides the most value:
-
-MySQL          → transactional data
-Redis          → personalized feeds
-Elasticsearch  → search
-AWS S3         → images/media
-Kafka          → asynchronous events
-
-4. Gateway-based security
-
-The frontend talks only to the API Gateway, while JWT validation is centralized at the gateway layer for protected services.
-
-📚 What I Learned
-
-Building this system provided hands-on experience with:
-
-Microservices decomposition
-
-Spring Boot and Spring Cloud Gateway
-
-JWT authentication and gateway security
-
-Spring Data JPA and MySQL
-
-Apache Kafka producers and consumers
-
-Event-driven architecture
-
-Redis-based fan-out-on-write feeds
-
-Elasticsearch indexing and search queries
-
-OpenFeign service-to-service communication
-
-AWS S3 media storage
-
-Dockerized infrastructure
-
-Building a React frontend for a distributed backend
-
-Keeping Redis and Elasticsearch consistent with database changes
-
-📌 Project Status
-
-Completed and integrated successfully. ✅
-
-The application includes authentication, profile management, connections, posts, personalized feeds, search, media storage, and persistent notifications across a Spring Boot microservices backend with a React frontend.
-
-This project is intended for learning, portfolio, and demonstration purposes.
-
-⭐ Author
-
-Sandeep
-
-GitHub: Sandeep0802
-
-⭐ If you find the project useful, consider giving the repository a star.
+⭐ If you found this project useful, feel free to explore the code and give the repository a star.
