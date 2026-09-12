@@ -10,26 +10,28 @@ The project demonstrates how independent microservices collaborate — through a
 
 ## 🏗️ Architecture
 
-```mermaid
-flowchart TD
-    Client([Client<br/>Web / Mobile / Postman]) --> GW["API Gateway : 8080<br/>JWT Validation"]
+```text
+                    Client (Web / Mobile / Postman)
+                                  │
+                                  ▼
+                      API Gateway  — :8080
+                      (validates JWT, routes requests)
+                                  │
+        ┌───────────┬────────────┼────────────┬────────────┐
+        ▼           ▼            ▼            ▼            ▼
+      User        Post         Feed        Search      Notification
+    Service      Service      Service      Service        Service
+     :8081        :8082        :8083        :8084          :8085
+     MySQL      MySQL + S3     Redis     Elasticsearch      MySQL
 
-    GW --> US["User Service : 8081<br/>MySQL + S3"]
-    GW --> PS["Post Service : 8082<br/>MySQL + S3"]
-    GW --> FS["Feed Service : 8083<br/>Redis"]
-    GW --> SS["Search Service : 8084<br/>Elasticsearch"]
-    GW --> NS["Notification Service : 8085<br/>MySQL"]
-
-    US -- publishes --> K{{Kafka}}
-    PS -- publishes --> K
-    K -- consumes --> FS
-    K -- consumes --> SS
-    K -- consumes --> NS
-    FS -. Feign call .-> US
-
-    style GW fill:#4f46e5,color:#fff
-    style K fill:#111827,color:#fff
+        │           │
+        └─────┬─────┘
+              ▼
+            Kafka  ──────────►  Feed Service, Search Service,
+        (event bus)              Notification Service
 ```
+
+User Service and Post Service **publish** events to Kafka. Feed Service, Search Service, and Notification Service **subscribe** to the events they each care about (full list below). Feed Service also calls User Service directly (via Feign) to look up a user's connections.
 
 ---
 
@@ -163,40 +165,16 @@ All routes below are exposed through the **API Gateway (`http://localhost:8080`)
 
 Kafka decouples the services. Below is every event currently published and who consumes it.
 
-```mermaid
-flowchart LR
-    subgraph US["User Service"]
-        UC[user.created]
-        UU[user.updated]
-        CR[connection.requested]
-        CA[connection.accepted]
-    end
-
-    subgraph PS["Post Service"]
-        PC[post.created]
-        PD[post.deleted]
-        PL[post.liked]
-        PM[post.commented]
-    end
-
-    SearchSvc["Search Service"]
-    FeedSvc["Feed Service"]
-    NotifSvc["Notification Service"]
-
-    UC --> SearchSvc
-    UC --> NotifSvc
-    UU --> SearchSvc
-
-    PC --> FeedSvc
-    PC --> SearchSvc
-    PD --> FeedSvc
-    PD --> SearchSvc
-    PL --> NotifSvc
-    PM --> NotifSvc
-
-    CR --> NotifSvc
-    CA --> NotifSvc
-```
+| Published by     | Event                   | Consumed by                              |
+| ----------------- | ------------------------ | ------------------------------------------ |
+| User Service       | `user.created`           | Search Service, Notification Service       |
+| User Service       | `user.updated`           | Search Service                             |
+| User Service       | `connection.requested`   | Notification Service                       |
+| User Service       | `connection.accepted`    | Notification Service                       |
+| Post Service        | `post.created`           | Feed Service, Search Service               |
+| Post Service        | `post.deleted`           | Feed Service, Search Service               |
+| Post Service        | `post.liked`             | Notification Service                       |
+| Post Service        | `post.commented`         | Notification Service                       |
 
 > 🆕 `post.deleted` is a newer addition: deleting a post now fans out to **both** the Feed Service (removes the post ID from every affected Redis feed) and the Search Service (removes the document from the Elasticsearch index), so deleted posts don't linger anywhere.
 
@@ -206,39 +184,27 @@ flowchart LR
 
 The feed uses a **fan-out-on-write** approach: work happens once at post-creation time so reads stay O(1) from Redis.
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant P as Post Service
-    participant K as Kafka
-    participant F as Feed Service
-    participant US as User Service
-    participant R as Redis
+**When a post is created:**
 
-    U->>P: Create post
-    P->>P: Save to MySQL
-    P->>K: publish post.created
-    K->>F: consume post.created
-    F->>US: getConnections(authorId)  [Feign]
-    US-->>F: [connectionIds]
-    F->>R: LPUSH feed:{connectionId} → postId (for each connection + author)
-    F->>R: TRIM to feed.max-size
+1. Post Service saves the post to MySQL and publishes `post.created` to Kafka.
+2. Feed Service consumes the event and asks User Service for the author's connections (via Feign).
+3. For the author **and** every connection, Feed Service pushes the new post's ID onto their Redis feed list, then trims the list to `feed.max-size`.
+
+```text
+Create post → MySQL → Kafka (post.created) → Feed Service
+                                                   │
+                                       get author's connections
+                                                   │
+                                                   ▼
+                              Redis: push postId onto each feed (author + connections)
 ```
 
-Deleting a post reverses the process, removing the post ID from every feed it was pushed into:
+**When a post is deleted**, the same path runs in reverse:
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant P as Post Service
-    participant K as Kafka
-    participant F as Feed Service
-
-    U->>P: Delete post
-    P->>P: Remove from MySQL
-    P->>K: publish post.deleted
-    K->>F: consume post.deleted
-    F->>F: Remove postId from author's + connections' feeds in Redis
+```text
+Delete post → MySQL → Kafka (post.deleted) → Feed Service
+                                                   │
+                                    remove postId from each feed
 ```
 
 Reads are simple and fast — `GET /api/v1/feed/{userId}` just paginates the pre-built Redis list; the client then fetches full post details from the Post Service.
@@ -249,13 +215,12 @@ Reads are simple and fast — `GET /api/v1/feed/{userId}` just paginates the pre
 
 Search runs independently of the transactional MySQL databases, staying in sync purely through Kafka.
 
-```mermaid
-flowchart LR
-    US[User Service] -- user.created / user.updated --> K{{Kafka}}
-    PS[Post Service] -- post.created / post.deleted --> K
-    K --> SS[Search Service]
-    SS -- index / update / delete --> ES[(Elasticsearch)]
-    Client([Client]) -- GET /api/v1/search/** --> SS
+```text
+User Service  ──┐  user.created / user.updated
+                 ├──►  Kafka  ──►  Search Service  ──►  Elasticsearch
+Post Service  ──┘  post.created / post.deleted
+
+Client  ──  GET /api/v1/search/**  ──►  Search Service  ──►  Elasticsearch
 ```
 
 ---
