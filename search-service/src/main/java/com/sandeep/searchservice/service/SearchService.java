@@ -10,6 +10,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.stream.StreamSupport;
 
 @Service
 @Slf4j
@@ -27,10 +28,22 @@ public class SearchService {
         return userSearchRepository.searchUsers(q);
 
     }
+    public List<UserDocument> getAllUsers() {
 
+        log.info("Fetching all users from search index");
+
+        return StreamSupport
+                .stream(
+                        userSearchRepository.findAll().spliterator(),
+                        false
+                )
+                .toList();
+    }
     public List<UserDocument> searchBySkill(String skill) {
 
-        return userSearchRepository.findBySkillsContaining(skill);
+        log.info("Searching Skills: {}", skill);
+
+        return userSearchRepository.searchBySkill(skill);
 
     }
 

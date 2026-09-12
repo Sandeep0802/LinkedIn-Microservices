@@ -17,6 +17,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -175,18 +176,35 @@ public class UserService {
 
     public List<UserResponse> getConnections(String userId) {
 
-        // Get connections requested by this user
-        // whose status is CONNECTED
-
         List<Connection> connections =
                 connectionRepository.findByRequesterIdAndStatus(
                         userId,
                         ConnectionStatus.CONNECTED
                 );
 
-        return connections.stream()
-                .map(e -> getUserProfile(e.getReceiverId()))
-                .collect(Collectors.toList());
+        List<Connection> receivedConnections =
+                connectionRepository.findByReceiverIdAndStatus(
+                        userId,
+                        ConnectionStatus.CONNECTED
+                );
+
+        List<UserResponse> result = new ArrayList<>();
+
+        // Users where current user was requester
+        result.addAll(
+                connections.stream()
+                        .map(e -> getUserProfile(e.getReceiverId()))
+                        .toList()
+        );
+
+        // Users where current user was receiver
+        result.addAll(
+                receivedConnections.stream()
+                        .map(e -> getUserProfile(e.getRequesterId()))
+                        .toList()
+        );
+
+        return result;
     }
 
     public List<Connection> getPendingConnections(String userId) {

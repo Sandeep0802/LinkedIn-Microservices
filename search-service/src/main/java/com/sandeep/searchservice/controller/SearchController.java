@@ -29,6 +29,14 @@ public class SearchController {
 
     }
 
+    @GetMapping("/people/all")
+    public ResponseEntity<List<UserDocument>> getAllUsers() {
+
+        return ResponseEntity.ok(
+                searchService.getAllUsers()
+        );
+    }
+
     @GetMapping("/skills")
     public ResponseEntity<List<UserDocument>> searchBySkill(@RequestParam String skill){
 

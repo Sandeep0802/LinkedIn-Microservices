@@ -2,6 +2,7 @@ package com.sandeep.feedservice.service;
 
 import com.sandeep.feedservice.client.UserServiceClient;
 import com.sandeep.feedservice.event.PostCreatedEvent;
+import com.sandeep.feedservice.event.PostDeletedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -88,6 +89,65 @@ public class FeedEventConsumer {
             log.error(
                     "Error in pushing post to feed: {}",
                     e.getMessage()
+            );
+        }
+    }
+
+    @KafkaListener(topics = "post.deleted")
+    public void consumePostDeletedEvent(PostDeletedEvent event) {
+
+        try {
+
+            String postId = event.getPostId();
+            String authorId = event.getAuthorId();
+
+            log.info(
+                    "Removing deleted post {} from feeds",
+                    postId
+            );
+
+            // Get author's connections
+            List<Map<String, Object>> connections =
+                    userServiceClient.getConnections(authorId);
+
+            // Remove from all connection feeds
+            for (Map<String, Object> connection : connections) {
+
+                String connectionId =
+                        (String) connection.get("id");
+
+                String feedKey =
+                        FEED_KEY_PREFIX + connectionId;
+
+                redisTemplate.opsForList()
+                        .remove(feedKey, 0, postId);
+
+                log.info(
+                        "Removed post {} from feed of user {}",
+                        postId,
+                        connectionId
+                );
+            }
+
+            // Remove from author's own feed
+            String authorFeedKey =
+                    FEED_KEY_PREFIX + authorId;
+
+            redisTemplate.opsForList()
+                    .remove(authorFeedKey, 0, postId);
+
+            log.info(
+                    "Removed post {} from author's feed {}",
+                    postId,
+                    authorId
+            );
+
+        } catch (Exception e) {
+
+            log.error(
+                    "Error removing deleted post from feeds: {}",
+                    e.getMessage(),
+                    e
             );
         }
     }

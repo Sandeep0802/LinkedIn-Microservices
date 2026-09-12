@@ -4,6 +4,7 @@ package com.sandeep.searchservice.service;
 import com.sandeep.searchservice.entity.PostDocument;
 import com.sandeep.searchservice.entity.UserDocument;
 import com.sandeep.searchservice.event.PostCreatedEvent;
+import com.sandeep.searchservice.event.PostDeletedEvent;
 import com.sandeep.searchservice.event.UserCreatedEvent;
 import com.sandeep.searchservice.event.UserUpdatedEvent;
 import com.sandeep.searchservice.repository.PostSearchRepository;
@@ -103,5 +104,32 @@ public class SearchEventConsumer {
 
         }
 
+    }
+
+    @KafkaListener(topics = "post.deleted")
+    public void consumePostDeletedEvent(PostDeletedEvent event) {
+
+        try {
+
+            log.info(
+                    "Deleting post from search index: {}",
+                    event.getPostId()
+            );
+
+            postSearchRepository.deleteById(event.getPostId());
+
+            log.info(
+                    "Post removed from search index: {}",
+                    event.getPostId()
+            );
+
+        } catch (Exception e) {
+
+            log.error(
+                    "Error deleting post from search index: {}",
+                    event.getPostId(),
+                    e
+            );
+        }
     }
 }

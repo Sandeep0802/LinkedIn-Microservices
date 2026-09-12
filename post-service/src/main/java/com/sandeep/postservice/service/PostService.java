@@ -5,6 +5,7 @@ import com.sandeep.postservice.entity.Like;
 import com.sandeep.postservice.entity.Post;
 import com.sandeep.postservice.event.PostCommentedEvent;
 import com.sandeep.postservice.event.PostCreatedEvent;
+import com.sandeep.postservice.event.PostDeletedEvent;
 import com.sandeep.postservice.event.PostLikedEvent;
 import com.sandeep.postservice.repository.CommentRepository;
 import com.sandeep.postservice.repository.LikeRepository;
@@ -33,6 +34,7 @@ public class PostService {
     private static final String POST_CREATED_TOPIC="post.created";
     private static final String POST_LIKED_TOPIC="post.liked";
     private static final String POST_COMMENTED_TOPIC="post.commented";
+    private static final String POST_DELETED_TOPIC = "post.deleted";
 
 
     //create a post
@@ -159,13 +161,32 @@ public class PostService {
 
     public void deletePost(String postId, String userId) {
 
-          Post post=getPost(postId);
-           if(!post.getAuthorId().equals(userId)){
-               throw new RuntimeException("Not authorize to delete this post");
-           }
+        Post post = getPost(postId);
 
-           postRepository.delete(post);
-           log.info("Post Deleted: {}",post.getId());
+        if (!post.getAuthorId().equals(userId)) {
+            throw new RuntimeException("Not authorize to delete this post");
+        }
+
+        String authorId = post.getAuthorId();
+
+        postRepository.delete(post);
+
+        log.info("Post Deleted: {}", postId);
+
+        PostDeletedEvent event = new PostDeletedEvent();
+        event.setPostId(postId);
+        event.setAuthorId(authorId);
+
+        kafkaTemplate.send(
+                POST_DELETED_TOPIC,
+                postId,
+                event
+        );
+
+        log.info(
+                "Post deleted event published: {}",
+                postId
+        );
     }
 
     public  List<Comment> getComments(String postId) {
